@@ -1,6 +1,8 @@
 package rpc
 
-import "context"
+import (
+	"context"
+)
 
 type UserService struct {
 	// 用反射来赋值
@@ -19,4 +21,18 @@ type GetByIdReq struct {
 
 type GetByIdResp struct {
 	Msg string
+}
+
+// UserServiceServer 业务实际上实现的方法
+type UserServiceServer struct {
+}
+
+func (u *UserServiceServer) GetById(ctx context.Context, req *GetByIdReq) (*GetByIdResp, error) {
+	return &GetByIdResp{
+		Msg: "hello, world",
+	}, nil
+}
+
+func (u *UserServiceServer) Name() string {
+	return "user-service"
 }

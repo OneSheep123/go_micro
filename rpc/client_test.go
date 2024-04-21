@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/golang/mock/gomock"
@@ -20,11 +21,17 @@ func TestSetStructFunc(t *testing.T) {
 		{
 			name:    "nil",
 			service: nil,
+			mock: func(ctrl *gomock.Controller) Proxy {
+				return NewMockProxy(ctrl)
+			},
 			wantErr: errors.New("rpc: 不支持 nil"),
 		},
 		{
 			name:    "*int",
 			service: UserService{},
+			mock: func(ctrl *gomock.Controller) Proxy {
+				return NewMockProxy(ctrl)
+			},
 			wantErr: errors.New("rpc: 只支持指向结构体的一级指针"),
 		},
 		{
@@ -32,11 +39,14 @@ func TestSetStructFunc(t *testing.T) {
 			service: &UserService{},
 			mock: func(ctrl *gomock.Controller) Proxy {
 				proxy := NewMockProxy(ctrl)
+				data, _ := json.Marshal(&GetByIdReq{Id: 1})
 				proxy.EXPECT().Invoke(gomock.Any(), &Request{
 					ServiceName: "user-service",
 					MethodName:  "GetById",
-					Arg:         &GetByIdReq{Id: 1},
-				}).Return(&Response{}, nil)
+					Arg:         data,
+				}).Return(&Response{
+					data: []byte(`{"Msg":"hello, world"}`),
+				}, nil)
 				return proxy
 			},
 		},
@@ -48,10 +58,12 @@ func TestSetStructFunc(t *testing.T) {
 			err := setStructFunc(tt.service, tt.mock(ctrl))
 			if err != nil {
 				assert.Equal(t, tt.wantErr, err)
+				return
 			}
 			resp, err := tt.service.(*UserService).GetById(context.Background(), &GetByIdReq{Id: 1})
 			if err != nil {
 				assert.Equal(t, tt.wantErr, err)
+				return
 			}
 			fmt.Println(resp)
 		})
