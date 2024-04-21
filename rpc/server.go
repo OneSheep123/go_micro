@@ -2,7 +2,6 @@ package rpc
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net"
@@ -10,17 +9,20 @@ import (
 )
 
 type Serve struct {
-	services map[string]Service
+	services map[string]reflectionStub
 }
 
 func NewServer() *Serve {
 	return &Serve{
-		services: make(map[string]Service, 16),
+		services: make(map[string]reflectionStub, 16),
 	}
 }
 
 func (s *Serve) RegisterService(service Service) {
-	s.services[service.Name()] = service
+	s.services[service.Name()] = reflectionStub{
+		s:     service,
+		value: reflect.ValueOf(service),
+	}
 }
 
 func (s *Serve) Start(network, address string) error {
@@ -43,27 +45,27 @@ func (s *Serve) Start(network, address string) error {
 
 func (s *Serve) handleConn(conn net.Conn) error {
 	for {
-		lengthByte := make([]byte, numOfLengthBytes)
-		_, err := conn.Read(lengthByte)
+		data, err := ReadMsg(conn)
 		if err != nil {
 			return err
 		}
-		length := binary.BigEndian.Uint64(lengthByte)
-		data := make([]byte, length)
-		_, err = conn.Read(data)
+
+		// 还原调用信息
+		req := &Request{}
+		err = json.Unmarshal(data, req)
 		if err != nil {
 			return err
 		}
-		resMsg, err := s.handleMsg(data)
+
+		resMsg, err := s.Invoke(context.Background(), req)
 		// 这个可能你的业务 error
 		// 暂时不知道怎么回传 error，所以我们简单记录一下
 		if err != nil {
 			return err
 		}
-		lenResMsg := len(resMsg)
-		res := make([]byte, lenResMsg+numOfLengthBytes)
-		binary.BigEndian.PutUint64(res[:numOfLengthBytes], uint64(lenResMsg))
-		copy(res[numOfLengthBytes:], resMsg)
+
+		// 获取响应信息
+		res := EncodeMsg(resMsg.data)
 
 		_, err = conn.Write(res)
 		if err != nil {
@@ -72,19 +74,28 @@ func (s *Serve) handleConn(conn net.Conn) error {
 	}
 }
 
-func (s *Serve) handleMsg(reqData []byte) ([]byte, error) {
-
-	req := &Request{}
-	err := json.Unmarshal(reqData, req)
-	if err != nil {
-		return nil, err
-	}
+func (s *Serve) Invoke(ctx context.Context, req *Request) (*Response, error) {
 	service, ok := s.services[req.ServiceName]
 	if !ok {
 		return nil, errors.New("你要调用的服务不存在")
 	}
-	vOf := reflect.ValueOf(service)
-	method := vOf.MethodByName(req.MethodName)
+	resp, err := service.invoke(ctx, req.MethodName, req.Arg)
+	if err != nil {
+		return nil, err
+	}
+	return &Response{
+		data: resp,
+	}, nil
+}
+
+type reflectionStub struct {
+	s     Service
+	value reflect.Value
+}
+
+func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []byte) ([]byte, error) {
+
+	method := s.value.MethodByName(methodName)
 	in := make([]reflect.Value, 2)
 
 	// in[0]：需要传入context
@@ -92,7 +103,8 @@ func (s *Serve) handleMsg(reqData []byte) ([]byte, error) {
 
 	// in[1]: GetByIdReq数据
 	inReq := reflect.New(method.Type().In(1).Elem())
-	err = json.Unmarshal(req.Arg, inReq.Interface())
+	err := json.Unmarshal(data, inReq.Interface())
+
 	if err != nil {
 		return nil, err
 	}
@@ -107,9 +119,5 @@ func (s *Serve) handleMsg(reqData []byte) ([]byte, error) {
 	}
 
 	// 返回时候也需要进行序列化一下
-	res, err := json.Marshal(result[0].Interface())
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return json.Marshal(result[0].Interface())
 }

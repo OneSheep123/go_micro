@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"log"
 )
 
 type UserService struct {
@@ -28,6 +29,7 @@ type UserServiceServer struct {
 }
 
 func (u *UserServiceServer) GetById(ctx context.Context, req *GetByIdReq) (*GetByIdResp, error) {
+	log.Printf("[UserServiceServer.GetById] 接收到远程的请求数据为%v\n", req)
 	return &GetByIdResp{
 		Msg: "hello, world",
 	}, nil

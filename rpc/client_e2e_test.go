@@ -20,7 +20,8 @@ func TestInitClientProxy(t *testing.T) {
 	usClient := &UserService{}
 	err := InitClientProxy(":8081", usClient)
 	require.NoError(t, err)
-	resp, err := usClient.GetById(context.Background(), &GetByIdReq{Id: 123})
+	ctx := context.WithValue(context.Background(), "id", "123")
+	resp, err := usClient.GetById(ctx, &GetByIdReq{Id: 123})
 	require.NoError(t, err)
 	assert.Equal(t, &GetByIdResp{
 		Msg: "hello, world",
