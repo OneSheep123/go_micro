@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"geek_micro/rpc/message"
 	"github.com/golang/mock/gomock"
 	"testing"
 
@@ -40,12 +41,12 @@ func TestSetStructFunc(t *testing.T) {
 			mock: func(ctrl *gomock.Controller) Proxy {
 				proxy := NewMockProxy(ctrl)
 				data, _ := json.Marshal(&GetByIdReq{Id: 1})
-				proxy.EXPECT().Invoke(gomock.Any(), &Request{
+				proxy.EXPECT().Invoke(gomock.Any(), &message.Request{
 					ServiceName: "user-service",
 					MethodName:  "GetById",
-					Arg:         data,
-				}).Return(&Response{
-					data: []byte(`{"Msg":"hello, world"}`),
+					Data:        data,
+				}).Return(&message.Response{
+					Data: []byte(`{"Msg":"hello, world"}`),
 				}, nil)
 				return proxy
 			},

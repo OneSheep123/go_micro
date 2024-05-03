@@ -26,13 +26,15 @@ type GetByIdResp struct {
 
 // UserServiceServer 业务实际上实现的方法
 type UserServiceServer struct {
+	Msg string
+	Err error
 }
 
 func (u *UserServiceServer) GetById(ctx context.Context, req *GetByIdReq) (*GetByIdResp, error) {
 	log.Printf("[UserServiceServer.GetById] 接收到远程的请求数据为%v\n", req)
 	return &GetByIdResp{
-		Msg: "hello, world",
-	}, nil
+		Msg: u.Msg,
+	}, u.Err
 }
 
 func (u *UserServiceServer) Name() string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"geek_micro/rpc/message"
 	"net"
 	"reflect"
 )
@@ -51,41 +52,41 @@ func (s *Serve) handleConn(conn net.Conn) error {
 		}
 
 		// 还原调用信息
-		req := &Request{}
-		err = json.Unmarshal(data, req)
+		req := message.DecodeReq(data)
+
+		resp, err := s.Invoke(context.Background(), req)
+		// 这个你的业务 error
 		if err != nil {
-			return err
+			// 所有的错误都在这里进行捕获塞入
+			resp.Error = []byte(err.Error())
 		}
 
-		resMsg, err := s.Invoke(context.Background(), req)
-		// 这个可能你的业务 error
-		// 暂时不知道怎么回传 error，所以我们简单记录一下
-		if err != nil {
-			return err
-		}
+		resp.SetHeadLength()
+		resp.SetBodyLength()
 
-		// 获取响应信息
-		res := EncodeMsg(resMsg.data)
-
-		_, err = conn.Write(res)
+		_, err = conn.Write(message.EncodeResp(resp))
 		if err != nil {
 			return err
 		}
 	}
 }
 
-func (s *Serve) Invoke(ctx context.Context, req *Request) (*Response, error) {
+func (s *Serve) Invoke(ctx context.Context, req *message.Request) (*message.Response, error) {
+	resp := &message.Response{
+		MessageId:  req.MessageId,
+		Version:    req.Version,
+		Compresser: req.Compresser,
+		Serializer: req.Serializer,
+	}
 	service, ok := s.services[req.ServiceName]
 	if !ok {
-		return nil, errors.New("你要调用的服务不存在")
+		return resp, errors.New("你要调用的服务不存在")
 	}
-	resp, err := service.invoke(ctx, req.MethodName, req.Arg)
-	if err != nil {
-		return nil, err
-	}
-	return &Response{
-		data: resp,
-	}, nil
+
+	respData, err := service.invoke(ctx, req.MethodName, req.Data)
+	resp.Data = respData
+
+	return resp, err
 }
 
 type reflectionStub struct {
@@ -112,12 +113,20 @@ func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []b
 	in[1] = inReq
 	result := method.Call(in)
 
-	// result[0]是返回值(eg: GetByIdResp)
-	// result[1]是error
 	if result[1].Interface() != nil {
-		return nil, result[1].Interface().(error)
+		// 执行返回的错误
+		err = result[1].Interface().(error)
 	}
 
-	// 返回时候也需要进行序列化一下
-	return json.Marshal(result[0].Interface())
+	var res []byte
+	if result[0].IsNil() {
+		return nil, err
+	} else {
+		var er error
+		res, er = json.Marshal(result[0].Interface())
+		if er != nil {
+			return nil, er
+		}
+	}
+	return res, err
 }

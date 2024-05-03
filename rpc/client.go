@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/silenceper/pool"
+	"geek_micro/rpc/message"
 	"net"
 	"reflect"
 	"time"
+
+	"github.com/silenceper/pool"
 )
 
 // InitClientProxy 要为 GetById 之类的函数类型的字段赋值
@@ -51,25 +53,46 @@ func setStructFunc(service Service, p Proxy) error {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
 
-				req := &Request{
+				req := &message.Request{
 					ServiceName: service.Name(),
 					MethodName:  fieldTyp.Name,
-					Arg:         reqData,
+					Data:        reqData,
 				}
 
-				// result => eg: Response { data : []byte("{"Msg": "Hello, world"}") }
-				result, err := p.Invoke(ctx, req)
+				req.SetHeadLength()
+				req.SetBodyLength()
+
+				// resp => eg: Response { data : []byte("{"Msg": "Hello, world"}") }
+				resp, err := p.Invoke(ctx, req)
+
 				if err != nil {
+					// 这里可能是网络异常
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
 
-				// 返回值序列化
-				err = json.Unmarshal(result.data, retVal.Interface())
-				if err != nil {
-					return []reflect.Value{retVal, reflect.ValueOf(err)}
+				var retErr error
+				if len(resp.Error) > 0 {
+					// 远端执行返回的错误
+					retErr = errors.New(string(resp.Error))
 				}
 
-				return []reflect.Value{retVal, reflect.Zero(reflect.TypeOf(new(error)).Elem())}
+				if len(resp.Data) > 0 {
+					// 返回值序列化
+					err = json.Unmarshal(resp.Data, retVal.Interface())
+					if err != nil {
+						// 序列化出错
+						return []reflect.Value{retVal, reflect.ValueOf(err)}
+					}
+				}
+
+				var retErrVal reflect.Value
+				if retErr == nil {
+					retErrVal = reflect.Zero(reflect.TypeOf(new(error)).Elem())
+				} else {
+					retErrVal = reflect.ValueOf(retErr)
+				}
+
+				return []reflect.Value{retVal, retErrVal}
 			}
 			fnVal := reflect.MakeFunc(fieldTyp.Type, fn)
 			fieldVal.Set(fnVal)
@@ -82,19 +105,14 @@ type Client struct {
 	pool pool.Pool
 }
 
-func (c *Client) Invoke(ctx context.Context, req *Request) (*Response, error) {
-	// rpc通信中 传输需要进行序列化
-	data, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
+func (c *Client) Invoke(ctx context.Context, req *message.Request) (*message.Response, error) {
+	// rpc通信中 传输需要进行
+	data := message.EncodeReq(req)
 	result, err := c.Send(data)
 	if err != nil {
 		return nil, err
 	}
-	return &Response{
-		data: result,
-	}, nil
+	return message.DecodeResp(result), nil
 }
 
 func NewClient(addr string) (*Client, error) {
@@ -120,7 +138,7 @@ func NewClient(addr string) (*Client, error) {
 	return &Client{pool: p}, nil
 }
 
-func (c *Client) Send(data []byte) ([]byte, error) {
+func (c *Client) Send(req []byte) ([]byte, error) {
 	val, err := c.pool.Get()
 	if err != nil {
 		return nil, err
@@ -130,8 +148,7 @@ func (c *Client) Send(data []byte) ([]byte, error) {
 		_ = c.pool.Put(val)
 	}()
 
-	res := EncodeMsg(data)
-	_, err = conn.Write(res)
+	_, err = conn.Write(req)
 	if err != nil {
 		return nil, err
 	}
