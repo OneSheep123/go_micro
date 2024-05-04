@@ -115,6 +115,12 @@ func (c *Client) Invoke(ctx context.Context, req *message.Request) (*message.Res
 
 type ClientOptions func(client *Client)
 
+func ClientWithSerializer(sl serialize.Serialize) ClientOptions {
+	return func(client *Client) {
+		client.serializer = sl
+	}
+}
+
 func NewClient(addr string, opts ...ClientOptions) (*Client, error) {
 	p, err := pool.NewChannelPool(&pool.Config{
 		InitialCap:  1,

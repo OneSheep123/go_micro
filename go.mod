@@ -7,6 +7,7 @@ require github.com/stretchr/testify v1.9.0
 require (
 	github.com/golang/mock v1.6.0
 	github.com/silenceper/pool v1.0.0
+	google.golang.org/protobuf v1.34.0
 )
 
 require (
