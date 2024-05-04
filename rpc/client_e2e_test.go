@@ -10,6 +10,7 @@ import (
 )
 
 func TestInitClientProxy(t *testing.T) {
+	// 初始化服务端
 	server := NewServer()
 	service := &UserServiceServer{}
 	// 服务端注册方法
@@ -19,8 +20,12 @@ func TestInitClientProxy(t *testing.T) {
 		t.Log(err)
 	}()
 	time.Sleep(time.Second * 3)
-	usClient := &UserService{}
-	err := InitClientProxy(":8081", usClient)
+
+	// 初始化客户端
+	us := &UserService{}
+	client, err := NewClient("localhost:8081")
+	require.NoError(t, err)
+	err = client.InitService(us)
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -65,7 +70,7 @@ func TestInitClientProxy(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.mock()
-			resp, er := usClient.GetById(context.Background(), &GetByIdReq{Id: 123})
+			resp, er := us.GetById(context.Background(), &GetByIdReq{Id: 123})
 			assert.Equal(t, tc.wantErr, er)
 			assert.Equal(t, tc.wantResp, resp)
 		})

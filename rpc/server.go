@@ -2,27 +2,40 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"geek_micro/rpc/message"
+	"geek_micro/rpc/serialize"
+	"geek_micro/rpc/serialize/json"
 	"net"
 	"reflect"
 )
 
 type Serve struct {
 	services map[string]reflectionStub
+	// 服务端得支持多种序列化协议
+	serializes map[uint8]serialize.Serialize
 }
 
 func NewServer() *Serve {
-	return &Serve{
-		services: make(map[string]reflectionStub, 16),
+	res := &Serve{
+		services:   make(map[string]reflectionStub, 16),
+		serializes: make(map[uint8]serialize.Serialize, 4),
 	}
+	// 设置默认序列化协议
+	s := &json.Serializer{}
+	res.serializes[s.Code()] = s
+	return res
+}
+
+func (s *Serve) RegisterSerialize(sl serialize.Serialize) {
+	s.serializes[sl.Code()] = sl
 }
 
 func (s *Serve) RegisterService(service Service) {
 	s.services[service.Name()] = reflectionStub{
-		s:     service,
-		value: reflect.ValueOf(service),
+		s:          service,
+		value:      reflect.ValueOf(service),
+		serializes: s.serializes,
 	}
 }
 
@@ -83,20 +96,21 @@ func (s *Serve) Invoke(ctx context.Context, req *message.Request) (*message.Resp
 		return resp, errors.New("你要调用的服务不存在")
 	}
 
-	respData, err := service.invoke(ctx, req.MethodName, req.Data)
+	respData, err := service.invoke(ctx, req)
 	resp.Data = respData
 
 	return resp, err
 }
 
 type reflectionStub struct {
-	s     Service
-	value reflect.Value
+	s          Service
+	value      reflect.Value
+	serializes map[uint8]serialize.Serialize
 }
 
-func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []byte) ([]byte, error) {
+func (s *reflectionStub) invoke(ctx context.Context, req *message.Request) ([]byte, error) {
 
-	method := s.value.MethodByName(methodName)
+	method := s.value.MethodByName(req.MethodName)
 	in := make([]reflect.Value, 2)
 
 	// in[0]：需要传入context
@@ -104,7 +118,11 @@ func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []b
 
 	// in[1]: GetByIdReq数据
 	inReq := reflect.New(method.Type().In(1).Elem())
-	err := json.Unmarshal(data, inReq.Interface())
+	serializer, ok := s.serializes[req.Serializer]
+	if !ok {
+		return nil, errors.New("micro: 不支持的序列化协议")
+	}
+	err := serializer.Decode(req.Data, inReq.Interface())
 
 	if err != nil {
 		return nil, err
@@ -123,7 +141,7 @@ func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []b
 		return nil, err
 	} else {
 		var er error
-		res, er = json.Marshal(result[0].Interface())
+		res, er = serializer.Encode(result[0].Interface())
 		if er != nil {
 			return nil, er
 		}
