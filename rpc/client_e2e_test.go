@@ -144,7 +144,57 @@ func TestInitClientJSON(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.mock()
+			//us.GetById(CtxWithOneWay(context.Background()), &GetByIdReq{Id: 123})
 			resp, er := us.GetById(context.Background(), &GetByIdReq{Id: 123})
+			assert.Equal(t, tc.wantErr, er)
+			assert.Equal(t, tc.wantResp, resp)
+		})
+	}
+
+}
+
+func TestInitClientOneWay(t *testing.T) {
+	// 初始化服务端
+	server := NewServer()
+	service := &UserServiceServer{}
+	// 服务端注册方法
+	server.RegisterService(service)
+	go func() {
+		err := server.Start("tcp", ":8081")
+		t.Log(err)
+	}()
+	time.Sleep(time.Second * 3)
+
+	// 初始化客户端
+	us := &UserService{}
+	client, err := NewClient("localhost:8081")
+	require.NoError(t, err)
+	err = client.InitService(us)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name string
+		mock func()
+
+		wantErr  error
+		wantResp *GetByIdResp
+	}{
+		{
+			name: "oneway",
+			mock: func() {
+				service.Err = errors.New("mock error")
+				service.Msg = "hello, world"
+			},
+			wantResp: &GetByIdResp{},
+			wantErr:  errors.New("micro: 这是一个 oneway 调用，你不应该处理任何结果"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.mock()
+			resp, er := us.GetById(CtxWithOneWay(context.Background()), &GetByIdReq{Id: 123})
+			//resp, er := us.GetById(context.Background(), &GetByIdReq{Id: 123})
 			assert.Equal(t, tc.wantErr, er)
 			assert.Equal(t, tc.wantResp, resp)
 		})

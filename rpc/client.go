@@ -49,11 +49,17 @@ func setStructFunc(service Service, p Proxy, s serialize.Serialize) error {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
 
+				var meta map[string]string
+				if isOneWay(ctx) {
+					meta = map[string]string{"one-way": "true"}
+				}
+
 				req := &message.Request{
 					Serializer:  s.Code(),
 					ServiceName: service.Name(),
 					MethodName:  fieldTyp.Name,
 					Data:        reqData,
+					Meta:        meta,
 				}
 
 				req.SetHeadLength()
@@ -106,7 +112,7 @@ type Client struct {
 func (c *Client) Invoke(ctx context.Context, req *message.Request) (*message.Response, error) {
 	// rpc通信中 传输需要进行
 	data := message.EncodeReq(req)
-	result, err := c.Send(data)
+	result, err := c.send(ctx, data)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +157,7 @@ func NewClient(addr string, opts ...ClientOptions) (*Client, error) {
 	return res, nil
 }
 
-func (c *Client) Send(req []byte) ([]byte, error) {
+func (c *Client) send(ctx context.Context, req []byte) ([]byte, error) {
 	val, err := c.pool.Get()
 	if err != nil {
 		return nil, err
@@ -164,6 +170,10 @@ func (c *Client) Send(req []byte) ([]byte, error) {
 	_, err = conn.Write(req)
 	if err != nil {
 		return nil, err
+	}
+
+	if isOneWay(ctx) {
+		return nil, errors.New("micro: 这是一个 oneway 调用，你不应该处理任何结果")
 	}
 
 	respBs, err := ReadMsg(conn)
